@@ -1,6 +1,6 @@
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
-from datasets.all_datasets import AllDatasetsShared  # Assuming this is your updated dataset class
+from custom.data.datasets.all_datasets import AllDatasetsShared  # Assuming this is your updated dataset class
 from torchvision import transforms
 
 class SeparateDatasetDataModule(pl.LightningDataModule):

@@ -291,13 +291,13 @@ class BasicClassifier(pl.LightningModule):
         self.acc[state + "_"].reset()
         self.auc_roc[state + "_"].reset()
 
-    def training_epoch_end(self, outputs):
+    def on_training_epoch_end(self, outputs):
         self._reset_metrics("train_")
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self, outputs):
         self._reset_metrics("val_")
 
-    def test_epoch_end(self, outputs):
+    def on_test_epoch_end(self, outputs):
         self._reset_metrics("test_")
 
     # NVFlare compatibility methods
