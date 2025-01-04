@@ -1,0 +1,23 @@
+{
+    "name": "andrei_thesis",
+
+    "resource_spec": {
+    },
+  
+    "deploy_map": {
+      "app_server": ["server"],
+  
+      "app_site-1": ["site-1"],
+      "app_site-2": ["site-2"],
+      "app_site-3": ["site-3"]
+    },
+  
+    "min_clients": 3,
+  
+    "mandatory_clients": [
+      "site-1",
+      "site-2",
+      "site-3"
+    ]
+}
+  

@@ -1,4 +1,3 @@
-from torch.utils.data import DataLoader
 import torch
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -10,8 +9,8 @@ import os
 # Replace LitModel import with your actual model class if needed
 from custom.models.model_lit import LitModel
 
-# Import your new DataModule
-from custom.data.datamodules.datamodule import SeparateDatasetDataModule
+# Import your CXP-only DataModule
+from data.datamodules.datamodule import CXPDataModule
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,29 +23,24 @@ SITE_NAME = flare_util.get_site_name()
 def main():
     """
     Main function for federated learning with NVFlare and PyTorch Lightning.
+    This version is tailored to the CXP dataset only.
     """
     try:
         logger.info(f"Starting NVFlare client for site: {SITE_NAME}")
 
         # ---------------------------------------------------------------------
-        # 1) Initialize the DataModule for local dataset
-        #    In a real multi-site setup, each site would ONLY load its own data.
-        #    But here, you have a Single DataModule that references all CSVs.
+        # 1) Initialize the DataModule for the CXP dataset
         # ---------------------------------------------------------------------
-        data_module = SeparateDatasetDataModule(
+        data_module = CXPDataModule(
             cxp_csv_path="/bigdata/andrei_thesis/preprocessed_site_data/CXP/cxp_data.csv",
             cxp_image_dir="/bigdata/andrei_thesis/CXP_data/images",
-            mimic_csv_path="/bigdata/andrei_thesis/preprocessed_site_data/MIMIC/mimic_data.csv",
-            mimic_image_dir="/bigdata/andrei_thesis/MIMIC/mimic-cxr-2.0.0.physionet.org",
-            nih_csv_path="/bigdata/andrei_thesis/preprocessed_site_data/NIH/nih_data.csv",
-            nih_image_dir="/bigdata/andrei_thesis/NIH_data/images",
-            batch_size=32,
-            num_workers=1,
+            batch_size=328,
+            num_workers=16,
             pin_memory=True,
         )
-        logger.info("Data module initialized.")
+        logger.info("CXP DataModule initialized.")
 
-        # Optional explicit setup calls
+        # Optional setup calls (Lightning will auto-setup on fit/validate anyway)
         data_module.setup("fit")
         data_module.setup("validate")
 
@@ -114,21 +108,13 @@ def main():
                 model.load_state_dict(input_model.weights)
 
             # b) Validate on local data
-            #    This data_module returns a dict of val loaders, so we iterate.
-            val_loaders = data_module.val_dataloader()
-            for dataset_name, val_loader in val_loaders.items():
-                logger.info(f"Validating on dataset: {dataset_name} ...")
-                trainer.validate(model, val_loader)
+            #    We only have a single val loader now.
+            logger.info("Validating on CXP dataset ...")
+            trainer.validate(model, data_module.val_dataloader())
 
             # c) Train on local data
-            train_loaders = data_module.train_dataloader()
-            for dataset_name, train_loader in train_loaders.items():
-                logger.info(f"Training locally on dataset: {dataset_name} ...")
-                trainer.fit(
-                    model,
-                    train_dataloaders=train_loader,
-                    val_dataloaders=None,
-                )
+            logger.info("Training locally on CXP dataset ...")
+            trainer.fit(model, train_dataloaders=data_module.train_dataloader())
 
             # d) Send updated weights back to the server
             flare_util.send({"weights": model.state_dict()})

@@ -47,10 +47,13 @@ class LitModel(BasicClassifier):
         if model_type == "densenet":
             self.model = densenet121(weights=DenseNet121_Weights.DEFAULT)
             num_ftrs = self.model.classifier.in_features
-            self.model.classifier = nn.Sequential(
-                nn.Linear(num_ftrs, out_ch),  # Use `out_ch` for the output size
-                nn.Sigmoid() if criterion_name == "BCELoss" else nn.Identity()
-            )
+            # self.model.classifier = nn.Sequential(
+            #     nn.Linear(num_ftrs, out_ch),  # Use `out_ch` for the output size
+            #     nn.Sigmoid() if criterion_name == "BCELoss" else nn.Identity()
+            # )
+            self.model.classifier = nn.Linear(num_ftrs, out_ch)
+            self.criterion = nn.BCEWithLogitsLoss()
+
         elif model_type == "resume":
             checkpoint = torch.load("results/checkpoint")
             self.model = checkpoint["model"]
@@ -58,7 +61,8 @@ class LitModel(BasicClassifier):
             raise ValueError(f"Unsupported model_type: {model_type}")
 
         # Define the loss function
-        self.criterion = nn.BCELoss() if criterion_name == "BCELoss" else nn.CrossEntropyLoss()
+        self.criterion = nn.BCEWithLogitsLoss() if criterion_name == "BCELoss" else nn.CrossEntropyLoss()
+
 
     def forward(self, x):
         """
