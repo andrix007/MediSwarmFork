@@ -34,8 +34,8 @@ def main():
         data_module = CXPDataModule(
             cxp_csv_path="/bigdata/andrei_thesis/preprocessed_site_data/CXP/cxp_data.csv",
             cxp_image_dir="/bigdata/andrei_thesis/CXP_data/images",
-            batch_size=328,
-            num_workers=16,
+            batch_size=128,
+            num_workers=8,
             pin_memory=True,
         )
         logger.info("CXP DataModule initialized.")
@@ -82,7 +82,7 @@ def main():
             enable_checkpointing=True,
             check_val_every_n_epoch=1,
             log_every_n_steps=10,
-            max_epochs=10,
+            max_epochs=1,
             logger=TensorBoardLogger(save_dir=path_run_dir),
         )
         logger.info("Trainer initialized.")

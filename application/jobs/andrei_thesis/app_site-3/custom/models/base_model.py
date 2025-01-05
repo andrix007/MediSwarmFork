@@ -253,6 +253,7 @@ class BasicClassifier(pl.LightningModule):
         self.auc_roc[state + "_"].update(pred, target)
 
         # Log metrics and loss
+        self.log('val_loss', loss, prog_bar=True, on_epoch=True, logger=True)
         self.log(f"{state}_loss", loss, batch_size=batch_size, on_step=True, on_epoch=True)
         self.log(f"{state}_accuracy", self.acc[state + "_"].compute(), batch_size=batch_size, on_step=False, on_epoch=True)
         self.log(f"{state}_auc_roc", self.auc_roc[state + "_"].compute(), batch_size=batch_size, on_step=False, on_epoch=True)
