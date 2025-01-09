@@ -1,3 +1,4 @@
+import time
 import torch
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -8,9 +9,16 @@ import os
 
 from custom.models.model_lit import LitModel
 
+from nvflare.app_common.abstract.fl_model import FLModel
+from nvflare.apis.dxo import DXO, MetaKey, DataKind
+
 # NIH-only DataModule
 from data.datamodules.datamodule import NIHDataModule
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()]
+)
 logger = logging.getLogger(__name__)
 
 flare_util.init()
@@ -32,6 +40,9 @@ def main():
             num_workers=8,
             pin_memory=True
         )
+        logger.info(f"NIH CSV Path: {data_module.nih_csv_path}")
+        logger.info(f"NIH Image Directory: {data_module.nih_image_dir}")
+        logger.info(f"Batch size: {data_module.batch_size}, Num workers: {data_module.num_workers}")
         logger.info("NIH DataModule initialized.")
 
         data_module.setup("fit")
@@ -46,11 +57,13 @@ def main():
             out_ch=8,
             spatial_dims=2,
         )
-        logger.info("Model initialized.")
+        logger.info(f"Model initialized with learning rate: {model.lr}, criterion: {model.criterion}")
 
         # 3) Configure the Trainer
         accelerator = "gpu" if torch.cuda.is_available() else "cpu"
         logger.info(f"Using {accelerator} for training")
+        if torch.cuda.is_available():
+            logger.info(f"GPU Utilization: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB")
 
         path_run_dir = f"./runs/{SITE_NAME}"
         os.makedirs(path_run_dir, exist_ok=True)
@@ -62,7 +75,7 @@ def main():
             save_top_k=1,
             mode="min",
         )
-
+        
         trainer = Trainer(
             accelerator=accelerator,
             precision=16 if torch.cuda.is_available() else 32,
@@ -84,23 +97,75 @@ def main():
                 break
 
             round_num = getattr(input_model, "current_round", None)
-            logger.info(f"Current round: {round_num}")
+            logger.info("Received input model with current round: %s", round_num)
+            logger.info("Training batch size: %s", len(data_module.train_dataloader()))
 
-            # Load global weights if provided
-            if hasattr(input_model, "weights"):
-                logger.info("Loading global weights into local model.")
+            # Load global weights if provided or initialize weights
+            if round_num == 0:
+                if hasattr(input_model, "weights"):
+                    logger.info("Initializing model with global weights for round 0.")
+                    model.load_state_dict(input_model.weights)
+                else:
+                    logger.warning("No global weights received for round 0. Using random initialization.")
+            elif hasattr(input_model, "weights"):
+                logger.info(f"Updating local model with received global weights for round {round_num} and NIH dataset.")
                 model.load_state_dict(input_model.weights)
 
             # Validate locally
-            logger.info("Validating on NIH dataset ...")
-            trainer.validate(model, data_module.val_dataloader())
+            start_time = time.time()
+            try:
+                logger.info("Validating on NIH dataset ...")
+                results = trainer.validate(model, data_module.val_dataloader())
+                logger.info(f"[DEBUG] Validation Results: {results}")
+                logger.info("NIH Validation completed successfully.")
+                logger.info(f"NIH Validation completed in {time.time() - start_time:.2f} seconds.")
+                logger.info(f"Validation Metrics: {trainer.callback_metrics}")
+                validation_metrics = {
+                    "val_loss": trainer.callback_metrics.get("val_loss", torch.tensor(float('inf'))).item(),
+                }
+            except Exception as e:
+                logger.error(f"NIH Validation failed: {e}")
+                logger.error(f"NIH Validation failed in {time.time() - start_time:.2f} seconds.")
+                raise
 
             # Train locally
-            logger.info("Training locally on NIH dataset ...")
-            trainer.fit(model, train_dataloaders=data_module.train_dataloader())
+            start_time = time.time()
+            try:
+                logger.info("Training locally on NIH dataset ...")
+                trainer.fit(model, train_dataloaders=data_module.train_dataloader())
+                logger.info("NIH Training completed successfully.")
+                logger.info(f"NIH Training completed in {time.time() - start_time:.2f} seconds.")
+                logger.info(f"Training Metrics: {trainer.callback_metrics}")
+                training_metrics = {
+                    "train_loss": trainer.callback_metrics.get("train_loss", torch.tensor(float('inf'))).item(),
+                    "train_loss_epoch": trainer.callback_metrics.get("train_loss_epoch", torch.tensor(float('inf'))).item(),
+                }
+            except Exception as e:
+                logger.error(f"NIH Training failed: {e}")
+                logger.error(f"NIH Training failed in {time.time() - start_time:.2f} seconds.")
+                raise
 
             # Send updates back to server
-            flare_util.send({"weights": model.state_dict()})
+            state_dict = model.state_dict()
+
+            num_steps = len(data_module.train_dataloader())/data_module.batch_size  # Or however you compute steps
+
+            fl_model = FLModel(
+                params=state_dict,  # Model weights
+                metrics={**validation_metrics, **training_metrics},  # Combine validation and training metrics
+                meta={
+                    MetaKey.NUM_STEPS_CURRENT_ROUND: num_steps,
+                    MetaKey.CURRENT_ROUND: round_num,
+                },
+            )
+
+            try:
+                logger.info("Sending model weights and metrics to the server ...")
+                flare_util.send(fl_model)
+                logger.info(f"Metrics sent to server: {fl_model.metrics}")
+            except Exception as e:
+                logger.error(f"Failed to send model weights/metrics: {e}")
+                raise
 
         # 5) Save best checkpoint
         model.save_best_checkpoint(

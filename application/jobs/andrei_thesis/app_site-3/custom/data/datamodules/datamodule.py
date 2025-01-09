@@ -1,8 +1,12 @@
+import os
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 from custom.data.datasets.all_datasets import AllDatasetsShared
 from torchvision import transforms
 import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
 
 class NIHDataModule(pl.LightningDataModule):
     """
@@ -50,18 +54,21 @@ class NIHDataModule(pl.LightningDataModule):
         """
         Sets up the dataset for each stage (fit, validate, test).
         """
+
         if stage in ("fit", None):
             df_train = self._load_csv(self.nih_csv_path, split="train")
             self.train_dataset = AllDatasetsShared(
                 dataframe=df_train,
                 transform=self.transforms
             )
+            logger.info(f"Train Dataset: {len(self.train_dataset)} samples")
 
             df_val = self._load_csv(self.nih_csv_path, split="val")
             self.val_dataset = AllDatasetsShared(
                 dataframe=df_val,
                 transform=self.transforms
             )
+            logger.info(f"Validation Dataset: {len(self.val_dataset)} samples")
 
         if stage in ("test", None):
             df_test = self._load_csv(self.nih_csv_path, split="test")
@@ -69,6 +76,9 @@ class NIHDataModule(pl.LightningDataModule):
                 dataframe=df_test,
                 transform=self.transforms
             )
+            logger.info(f"Test Dataset: {len(self.test_dataset)} samples")
+        
+
 
     def train_dataloader(self):
         return DataLoader(

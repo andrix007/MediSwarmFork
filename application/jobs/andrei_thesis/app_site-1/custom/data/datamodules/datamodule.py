@@ -3,6 +3,10 @@ from torch.utils.data import DataLoader
 from custom.data.datasets.all_datasets import AllDatasetsShared
 from torchvision import transforms
 import pandas as pd
+import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class CXPDataModule(pl.LightningDataModule):
@@ -71,6 +75,8 @@ class CXPDataModule(pl.LightningDataModule):
                 dataframe=df_val,
                 transform=self.transforms
             )
+            logger.info(f"Train Dataset: {len(self.train_dataset)} samples")
+            logger.info(f"Validation Dataset: {len(self.val_dataset)} samples")
 
         if stage in ("test", None):
             # Load test subset
@@ -79,6 +85,8 @@ class CXPDataModule(pl.LightningDataModule):
                 dataframe=df_test,
                 transform=self.transforms
             )
+        
+            logger.info(f"Test Dataset: {len(self.test_dataset)} samples")
 
     def train_dataloader(self):
         """

@@ -24,7 +24,7 @@ class SwarmServerController(ServerSideController):
         result_clients=None,  # List of clients to receive the final model
         starting_client=None,  # Client responsible for initiating the workflow
         max_status_report_interval: float = Constant.PER_CLIENT_STATUS_REPORT_TIMEOUT,  # Max interval for client status reporting (in seconds)
-        progress_timeout: float = Constant.WORKFLOW_PROGRESS_TIMEOUT,  # Timeout for overall workflow progress (in seconds)
+        progress_timeout: float = 36000,  # Timeout for overall workflow progress (in seconds)
         private_p2p: bool = True,  # Flag to indicate private peer-to-peer communication
         aggr_clients=None,  # Clients designated for aggregation
         train_clients=None,  # Clients designated for training

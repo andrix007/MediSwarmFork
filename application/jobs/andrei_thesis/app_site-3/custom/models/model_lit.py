@@ -3,8 +3,11 @@ import torch
 from torch import nn
 import pytorch_lightning as pl
 from torchvision.models import densenet121, DenseNet121_Weights
+from torchmetrics import Accuracy, AUROC
 from .base_model import BasicClassifier
+import logging
 
+logger = logging.getLogger(__name__)
 
 class LitModel(BasicClassifier):
     """
@@ -42,6 +45,7 @@ class LitModel(BasicClassifier):
         self.epoch_logs = []  # To track epoch logs
         self.current_train_loss = None
         self.current_lr = lr
+        self.val_accuracy = Accuracy(task="multiclass", num_classes=num_labels)
 
         # Initialize the model
         if model_type == "densenet":
@@ -62,6 +66,9 @@ class LitModel(BasicClassifier):
 
         # Define the loss function
         self.criterion = nn.BCEWithLogitsLoss() if criterion_name == "BCELoss" else nn.CrossEntropyLoss()
+        
+        logger.info(f"Total Trainable Parameters: {sum(p.numel() for p in self.model.parameters() if p.requires_grad)}")
+
 
 
     def forward(self, x):
@@ -87,10 +94,19 @@ class LitModel(BasicClassifier):
         loss = self.criterion(preds, labels)
 
         # Log metrics and loss
-        self.log(f"{state}_loss", loss, on_step=(state == "train"), on_epoch=True, prog_bar=True)
-
         if state == "train":
-            self.current_train_loss = loss
+            accuracy = self.acc["train_"].update(preds, labels)
+
+            self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+            #self.log("train_auc", auc_roc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+
+        elif state == "val":
+
+            self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+            logger.info(f"[DEBUG] Validation Loss: {loss.item()}")
+
+            #self.log("val_accuracy", accuracy, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -104,8 +120,13 @@ class LitModel(BasicClassifier):
         preds = self(imgs)
         loss = self.criterion(preds, labels)
 
-        self.test_outputs.append({"preds": preds, "labels": labels, "paths": paths})
-        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        accuracy = self.acc["test_"].update(preds, labels)
+        auc_roc = self.auc_roc["test_"].update(preds, labels)
+
+        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        # self.log("test_accuracy", accuracy, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        # self.log("test_auc", auc_roc, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+
         return {"preds": preds, "labels": labels, "paths": paths}
 
     def configure_optimizers(self):
@@ -118,13 +139,26 @@ class LitModel(BasicClassifier):
     def on_train_epoch_end(self):
         optimizer = self.trainer.optimizers[0]
         self.current_lr = optimizer.param_groups[0]["lr"]
+        logger.info(f"Epoch {self.current_epoch} completed. Current LR: {self.current_lr}")
+
+    def on_validation_epoch_start(self):
+        self.val_accuracy.reset()
 
     def on_validation_epoch_end(self):
-        val_loss = self.trainer.callback_metrics.get("val_loss", None)
+        metrics = self.trainer.callback_metrics
+
+        logger.info(f"[DEBUG] Callback Metrics at Validation Epoch End: {metrics}")
+
+        val_loss = metrics.get("val_loss", None)
+        val_accuracy = metrics.get("val_accuracy", None)
+
+        logger.info(f"Validation metrics: Loss={val_loss}, Accuracy={val_accuracy}")
+
         epoch_log = {
             "epoch": self.current_epoch,
             "train_loss": self.current_train_loss.item() if self.current_train_loss is not None else "N/A",
             "val_loss": val_loss.item() if val_loss is not None else "N/A",
+            "val_accuracy": val_accuracy.item() if val_accuracy is not None else "N/A",
             "seed": self.seed,
             "lr": self.current_lr,
         }
