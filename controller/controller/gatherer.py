@@ -1,3 +1,4 @@
+import logging
 import threading
 import time
 import numpy as np
@@ -14,6 +15,11 @@ from nvflare.app_common.ccwf.client_ctl import ClientSideController
 from nvflare.app_common.ccwf.common import Constant
 from nvflare.security.logging import secure_format_traceback
 
+logging.basicConfig(
+    level=logging.DEBUG,   # <-- Now shows DEBUG messages too
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()]
+)
 
 class _TrainerStatus:
     """
@@ -82,6 +88,9 @@ class Gatherer(FLComponent):
         """
         with self.lock:
             try:
+                self.log_debug(fl_ctx, f"Received result from {client_name}: {result}")
+                self.log_info(fl_ctx, f"Aggregator sees dxo.meta: {result.get_peer_props()}")
+
                 return self._do_gather(client_name, result, fl_ctx)
             except Exception as e:
                 self.log_error(fl_ctx, f"Exception gathering: {secure_format_traceback()}")
@@ -145,13 +154,16 @@ class Gatherer(FLComponent):
         """
 
         def _is_valid_value(value: float) -> bool:
-            return ( value is not None ) and ( not np.isnan(value) )
+            return ( value is not None ) and ( not np.isnan(value) ) and ( not np.isinf(value) )
 
         fl_ctx = self.fl_ctx
         self.log_info(fl_ctx, f"Start aggregation for round {self.for_round}")
         self.fire_event(AppEventType.BEFORE_AGGREGATION, fl_ctx)
         try:
             aggr_result = self.aggregator.aggregate(fl_ctx)
+            self.logger.info(f"fl context: {fl_ctx}")
+            self.logger.debug(f"aggr_result content: {aggr_result}")
+
         except Exception as e:
             self.log_error(fl_ctx, f"Exception in aggregation: {secure_format_traceback()}")
             self.executor.update_status(action="aggregate", error=ReturnCode.EXECUTION_EXCEPTION)
@@ -183,7 +195,12 @@ class Gatherer(FLComponent):
             best_round = self.current_best_round
             best_metric = self.current_best_global_metric
             best_client = self.current_best_client
-
+        
+        
+        if not _is_valid_value(best_metric):
+            self.log_warning(fl_ctx, "No valid metrics received during aggregation. Using default values.")
+            best_metric = float('inf')  # For loss, use infinity as the worst-case scenario
+            best_client = None
         self.log_info(fl_ctx, f"Global best metric is {best_metric} from client {best_client} at round {best_round}")
 
         aggr_result.set_header(Constant.ROUND, best_round)

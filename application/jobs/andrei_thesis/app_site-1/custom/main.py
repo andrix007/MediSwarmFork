@@ -12,6 +12,7 @@ from custom.models.model_lit import LitModel
 
 from nvflare.app_common.abstract.fl_model import FLModel
 from nvflare.apis.dxo import DXO, MetaKey, DataKind
+from nvflare.client.utils import numerical_params_diff
 
 # Import your CXP-only DataModule
 from data.datamodules.datamodule import CXPDataModule
@@ -42,7 +43,7 @@ def main():
         data_module = CXPDataModule(
             cxp_csv_path="/bigdata/andrei_thesis/preprocessed_site_data/CXP/cxp_data.csv",
             cxp_image_dir="/bigdata/andrei_thesis/CXP_data/images",
-            batch_size=128,
+            batch_size=172,
             num_workers=8,
             pin_memory=True,
         )
@@ -111,6 +112,7 @@ def main():
             if not input_model:
                 logger.info("No input model received — possibly shutting down.")
                 break
+            original_params = input_model.params
 
             round_num = getattr(input_model, "current_round", None)
             
@@ -164,16 +166,30 @@ def main():
             # d) Send updated weights back to the server
             state_dict = model.state_dict()
 
+            logger.info(f"Original keys: {list(original_params.keys())}")
+            logger.info(f"New keys: {list(state_dict.keys())}")     
+
             num_steps = len(data_module.train_dataloader())/data_module.batch_size  # Or however you compute steps
 
+            # Create DXO for the current round
+            model_dxo = DXO(data_kind=DataKind.WEIGHT_DIFF, data=state_dict)
+            logger.info(f"DXO keys: {list(model_dxo.data.keys())}")
+
+            # Construct FLModel
             fl_model = FLModel(
-                params=state_dict,  # Model weights
-                metrics={**validation_metrics, **training_metrics},  # Combine validation and training metrics
+                params=model_dxo.to_shareable(),  # Wrap DXO in a Shareable
+                metrics={**validation_metrics, **training_metrics},  # Combine metrics
                 meta={
                     MetaKey.NUM_STEPS_CURRENT_ROUND: num_steps,
                     MetaKey.CURRENT_ROUND: round_num,
                 },
             )
+
+            if round_num == 0:  # or a condition indicating the first round
+                fl_model.params = state_dict  # Send full parameters
+            else:
+                fl_model.params = numerical_params_diff(original_params, state_dict)
+
 
             try:
                 logger.info("Sending model weights and metrics to the server ...")
